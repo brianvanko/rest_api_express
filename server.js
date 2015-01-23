@@ -7,13 +7,12 @@ var User       = require('./app/models/user');
 var port       = process.env.PORT || 8080; 
 var jwt 	   = require('jsonwebtoken');
 
-var superSecret = 'insert secret';
+var superSecret = 'supersecretpassword';
 
 //config
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-//cors
 app.use(function(req, res, next) {
 	res.setHeader('Access-Control-Allow-Origin', '*');
 	res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
@@ -23,77 +22,77 @@ app.use(function(req, res, next) {
  
 app.use(morgan('dev'));
 
-mongoose.connect('INSERT DB PATH'); 
+//connect to db
+mongoose.connect('mongodb://localhost/user_crm'); 
 
+//routes
+//homepage
 app.get('/', function(req, res) {
 	res.send('Welcome to the home page!');
 });
 
 var apiRouter = express.Router();
 
-apiRouter.post('/authenticate', function(req, res) {
 
-  User.findOne({
-    username: req.body.username
-  }).select('name username password').exec(function(err, user) {
 
-    if (err) throw err;
+apiRouter('/authenticat', function (req, res) {
+	User.findOne({
+		_id: req.body.username
+	}).select('name username password').exec(function (err, user) {
+		if (err) throw err;
 
-    if (!user) {
-      res.json({ success: false, message: 'Authentication failed. User not found.' });
-    } else if (user) {
+		if (!user) {
+			res.json({success: false, message: 'Authentication fails. User not found.'})
+		} else if (user) {
+			var validPassword = user.comparePassword(req.body.password);
+			if (!validPassword) {
+				res.json({success: false, message: 'Authentication failed. Wrong password.'})
+			} else {
+				var token = jwt.sign({
+					name: user.name,
+					username: user.username,
+				}, superSecret, {
+					expiresInMinutes: 1440
+				});
 
-      var validPassword = user.comparePassword(req.body.password);
-      if (!validPassword) {
-        res.json({ success: false, message: 'Authentication failed. Wrong password.' });
-      } else {
+				res.json({
+					success: true,
+					message: 'Enjoy your token!',
+					token: token
+				})
+			}
+		}
+	})
+})
 
-        var token = jwt.sign({
-        	name: user.name,
-        	username: user.username
-        }, superSecret, {
-          expiresInMinutes: 1440 
-        });
-
-        res.json({
-          success: true,
-          message: 'Enjoy your token!',
-          token: token
-        });
-      }   
-
-    }
-
-  });
-});
-
-//middleware
+//api middleware
 apiRouter.use(function(req, res, next) {
 
 	console.log('Somebody just came to our app!');
 
-  var token = req.body.token || req.param('token') || req.headers['x-access-token'];
+	var token = req.body.token || req.param('token') || req.headers['x-access-token'];
 
-  if (token) {
-    jwt.verify(token, superSecret, function(err, decoded) {      
-      if (err)
-        return res.json({ success: false, message: 'Failed to authenticate token.' });    
-      else
-        req.decoded = decoded;    
-    });
+	if (token) {
+		jwt.verify(token, superSecret, function(err, decoded) {
+			if (err) {
+				return res.json({success: false, message: 'Failed to authenticate token.'})
+			}
 
-  } else {
-    return res.status(403).send({ success: false, message: 'No token provided.' });
-    
-  }
+			req.decoded = decoded;
+		});
+	} else {
+		return res.status(403).send({success: false, message: 'No token provided.'})
+	}
 
-  next(); 
+	next(); 
 });
 
+// accessed from /api
 apiRouter.get('/', function(req, res) {
 	res.json({ message: 'hooray! welcome to our api!' });	
 });
 
+// api users resource
 apiRouter.route('/users')
 
 	.post(function(req, res) {
@@ -105,12 +104,14 @@ apiRouter.route('/users')
 
 		user.save(function(err) {
 			if (err) {
+				// duplicate entry
 				if (err.code == 11000) 
 					return res.json({ success: false, message: 'A user with that username already exists. '});
 				else 
 					return res.send(err);
 			}
 
+			// return a message
 			res.json({ message: 'User created!' });
 		});
 
@@ -118,7 +119,7 @@ apiRouter.route('/users')
 
 	.get(function(req, res) {
 		User.find(function(err, users) {
-			if (err) res.send(err);
+			if (err) return res.send(err);
 
 			res.json(users);
 		});
@@ -128,8 +129,9 @@ apiRouter.route('/users/:user_id')
 
 	.get(function(req, res) {
 		User.findById(req.params.user_id, function(err, user) {
-			if (err) res.send(err);
+			if (err) return res.send(err);
 
+			// return that user
 			res.json(user);
 		});
 	})
@@ -137,14 +139,16 @@ apiRouter.route('/users/:user_id')
 	.put(function(req, res) {
 		User.findById(req.params.user_id, function(err, user) {
 
-			if (err) res.send(err);
+			if (err) return res.send(err);
 
+			// set the new user information if it exists in the request
 			if (req.body.name) user.name = req.body.name;
 			if (req.body.username) user.username = req.body.username;
 			if (req.body.password) user.password = req.body.password;
 
+			// save the user
 			user.save(function(err) {
-				if (err) res.send(err);
+				if (err) return res.send(err);
 
 				res.json({ message: 'User updated!' });
 			});
@@ -156,20 +160,19 @@ apiRouter.route('/users/:user_id')
 		User.remove({
 			_id: req.params.user_id
 		}, function(err, user) {
-			if (err) res.send(err);
+			if (err) return res.send(err);
 
 			res.json({ message: 'Successfully deleted' });
 		});
 	});
 
-apiRouter.get('/me', function(req, res) {
+apiRouter.get('/me', function (req, res) {
 	res.send(req.decoded);
-});
+})
 
-// REGISTER OUR ROUTES -------------------------------
+//register api routes
 app.use('/api', apiRouter);
 
-// START THE SERVER
-// =============================================================================
+//start the server
 app.listen(port);
 console.log('Magic happens on port ' + port);
